@@ -1,6 +1,7 @@
 import web
 import os
-import urllib2, httplib
+import requests
+import urllib, urllib2, httplib
 import json 
 from sanction import Client
 
@@ -8,16 +9,18 @@ from StringIO import StringIO
 
 
 web.config.debug = False
-
+# get a Client ID and Secret from 
+# https://login.rally1.rallydev.com/accounts/index.html#/clients
 CLIENT_ID = os.environ.get('CLIENT_ID', '') 
 CLIENT_SECRET = os.environ.get('CLIENT_SECRET', '') 
+# Server URL must match the one specified when creating the client
 SERVER_URL = os.environ.get('SERVER_URL', '') + "/oauth-redirect"
-RALLY_WSAPI_URL = "rally1.rallydev.com"
-RALLY_USER_URL = "/slm/webservice/v2.x/user"
 
-print CLIENT_ID
-print CLIENT_SECRET
-print SERVER_URL
+
+# We will use these to make WSAPI calls
+RALLY_WSAPI_URL = "https://rally1.rallydev.com"
+RALLY_USER_URL = RALLY_WSAPI_URL + "/slm/webservice/v2.x/user"
+RALLY_STORIES_URL = RALLY_WSAPI_URL + "/slm/webservice/v2.x/hierarchicalrequirement"
 
 try:
 	c = Client(auth_endpoint = "https://rally1.rallydev.com/login/oauth2/auth",
@@ -31,7 +34,7 @@ except Exception, e:
 
 
 urls = (
-	'/', 'display_stories',
+	'/', 'display_stories', 
 	'/login', 'login',
 	'/logout', 'logout',
 	'/oauth-redirect', 'redirect' 
@@ -39,39 +42,44 @@ urls = (
 
 app = web.application(urls, globals())
 session = web.session.Session(app, web.session.DiskStore('sessions'), initializer={'access_token' : None})
+render = web.template.render('templates')
 
 class display_stories:
 	def GET(self, *args, **kwargs):
-		print "Session is ", session, " -- ", session.keys(), " -- ", session.values()
-		if not session.get("access_token"):
+		if not session.get("access_token"): # redirect if we aren't logged in
 			raise web.seeother('/login')
 		
-		conn = httplib.HTTPSConnection(RALLY_WSAPI_URL)
-		conn.connect()
-		conn.request("GET", RALLY_USER_URL, headers = { "zsessionid" : session["access_token"] })
-		user_resp = json.loads(conn.getresponse().read())
-		print "User Resp ", user_resp
-		return "Hello ", user_resp["User"]["UserName"] 
+		
+		r = requests.get(RALLY_USER_URL, headers = { "zsessionid" : session["access_token"] })
+		user_resp = r.json()
+		username = user_resp.get("User", {}).get("UserName")
+		if not username:
+			raise Exception("No username found")
+
+		story_params = { "fetch" : "Name", "query" : "(Owner = dgriffin@rallydev.com)" }
+		r = requests.get( RALLY_STORIES_URL, params=story_params, headers = { "zsessionid" : session["access_token"], "Accept" : "application/json" })
+		return render.index(username, r.json()["QueryResult"]["Results"]) 
 
 class login:
 	def GET(self, *args, **kwargs):
-		print "Login ", kwargs, " args ", args, " -- ", web.seeother(c.auth_uri(redirect_uri = SERVER_URL, scope="openid"))
+		# redirect to the Rally OAuth server
 		raise web.seeother(c.auth_uri(redirect_uri = SERVER_URL, scope="openid"))
 
 class logout:
 	def GET(self, *args, **kwargs):
-		return "Logout"
+		session.access_token = None
+		return "Logged out"
 
 class redirect:
 	def GET(self, *args, **kwargs):
 		code = web.input( code = '')["code"]
-		try:
-			access_token = c.request_token( redirect_uri = SERVER_URL, code = code )
-		except urllib2.HTTPError, e:
-			raise e
+		
+		# we lookup the access token using the speicified code
+		# we need to send the same redirect_uri even though we don't redirect
+		access_token = c.request_token( redirect_uri = SERVER_URL, code = code )
+		# set the access_token on the session
 		session.access_token = c.access_token
-		print "Session ", session.keys(), " -- ", session.values(), " -- ", session.get("access_token"), " -- ", c.access_token, " access ", access_token
-		print "Try this ", session.access_token
+		
 		raise web.seeother('/')
 
 
