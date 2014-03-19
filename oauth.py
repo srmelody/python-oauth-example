@@ -49,20 +49,22 @@ class display_stories:
 		if not session.get("access_token"): # redirect if we aren't logged in
 			raise web.seeother('/login')
 		
-		
+		# get the user info for whoever logged in
 		r = requests.get(RALLY_USER_URL, headers = { "zsessionid" : session["access_token"] })
 		user_resp = r.json()
 		username = user_resp.get("User", {}).get("UserName")
 		if not username:
 			raise Exception("No username found")
 
+		# form the query to get all of the user stories for whoever logged in
 		story_params = { "fetch" : "Name", "query" : "(Owner = dgriffin@rallydev.com)" }
 		r = requests.get( RALLY_STORIES_URL, params=story_params, headers = { "zsessionid" : session["access_token"], "Accept" : "application/json" })
+		
 		return render.index(username, r.json()["QueryResult"]["Results"]) 
 
 class login:
 	def GET(self, *args, **kwargs):
-		# redirect to the Rally OAuth server
+		# redirect to the Rally OAuth server using a URL created by sanction
 		raise web.seeother(c.auth_uri(redirect_uri = SERVER_URL, scope="openid"))
 
 class logout:
