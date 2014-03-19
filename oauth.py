@@ -1,8 +1,8 @@
 import web
 import os
 import requests
-import urllib, urllib2, httplib
 import json 
+import uuid
 from sanction import Client
 
 from StringIO import StringIO
@@ -65,16 +65,23 @@ class display_stories:
 class login:
 	def GET(self, *args, **kwargs):
 		# redirect to the Rally OAuth server using a URL created by sanction
-		raise web.seeother(c.auth_uri(redirect_uri = SERVER_URL, scope="openid"))
+		state = uuid.uuid1()
+		session["state"] = state
+		raise web.seeother(c.auth_uri(redirect_uri = SERVER_URL, scope="openid", state=state))
 
 class logout:
 	def GET(self, *args, **kwargs):
-		session.access_token = None
+		session["access_token"] = None
 		return "Logged out"
 
 class redirect:
 	def GET(self, *args, **kwargs):
 		code = web.input( code = '')["code"]
+		state = web.input( state = '')["state"]
+		
+		# check to make sure the states match
+		if state != str(session.state): # coerce the uuid class to string
+			raise Exception("State did not match")
 		
 		# we lookup the access token using the speicified code
 		# we need to send the same redirect_uri even though we don't redirect
